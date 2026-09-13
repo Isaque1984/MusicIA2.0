@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0b12">
+<title>MusicIA</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#09090f;color:#fff;font-family:Arial,sans-serif}
+.wrap{max-width:760px;margin:auto;padding:24px 16px 50px}.logo{font-size:30px;font-weight:800;text-align:center;margin:8px 0 4px}
+.sub{text-align:center;color:#a7a7b5;margin-bottom:24px}.card{background:#12121b;border:1px solid #292936;border-radius:18px;padding:18px;margin-bottom:16px}
+label{display:block;font-weight:700;margin:12px 0 7px}textarea,select{width:100%;background:#0b0b12;color:#fff;border:1px solid #343444;border-radius:12px;padding:13px;font-size:16px}
+textarea{min-height:120px;resize:vertical}.row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+button{width:100%;border:0;border-radius:13px;padding:15px;font-size:17px;font-weight:800;cursor:pointer}
+.primary{background:#fff;color:#000;margin-top:16px}.secondary{background:#232330;color:#fff;margin-top:10px}
+.status{margin-top:12px;color:#b9b9c8;font-size:14px;text-align:center}.lyrics{white-space:pre-wrap;line-height:1.6;color:#ddd;background:#0b0b12;border-radius:12px;padding:14px;min-height:80px}
+audio{width:100%;margin-top:10px}.hidden{display:none}.small{font-size:12px;color:#858594;text-align:center;margin-top:15px}
+@media(max-width:560px){.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="logo">🎵 MusicIA</div>
+  <div class="sub">Transforme uma ideia em uma música.</div>
+
+  <div class="card">
+    <label for="idea">Como você quer sua música?</label>
+    <textarea id="idea" placeholder="Ex.: uma música sertaneja sobre um homem que perdeu o amor da vida e ainda espera por ela..."></textarea>
+
+    <div class="row">
+      <div>
+        <label for="style">Estilo</label>
+        <select id="style">
+          <option>Sertanejo</option><option>Funk</option><option>Trap</option><option>Rap</option>
+          <option>Pop</option><option>Rock</option><option>Gospel</option><option>Forró</option><option>MPB</option>
+        </select>
+      </div>
+      <div>
+        <label for="mood">Clima</label>
+        <select id="mood">
+          <option>Romântico</option><option>Triste</option><option>Alegre</option>
+          <option>Motivacional</option><option>Sombrio</option><option>Épico</option>
+        </select>
+      </div>
+    </div>
+
+    <label for="voice">Voz</label>
+    <select id="voice">
+      <option>Masculina</option><option>Feminina</option><option>Dueto</option><option>Instrumental</option>
+    </select>
+
+    <button class="primary" id="generate">🎶 Criar música</button>
+    <div class="status" id="status">Pronto para criar.</div>
+  </div>
+
+  <div class="card hidden" id="resultCard">
+    <h3>🎧 Sua música</h3>
+    <audio id="audio" controls preload="metadata"></audio>
+    <button class="secondary" id="download">⬇️ Baixar áudio</button>
+    <h3>📝 Letra</h3>
+    <div class="lyrics" id="lyrics"></div>
+  </div>
+
+  <div class="small">MusicIA • Protótipo 1.0</div>
+</div>
+
+<script type="module">
+import { Client } from "https://cdn.jsdelivr.net/npm/@gradio/client/+esm";
+
+const $ = id => document.getElementById(id);
+const setStatus = t => $("status").textContent = t;
+let lastAudio = "";
+
+function promptFromForm() {
+  const style = $("style").value;
+  const mood = $("mood").value;
+  const voice = $("voice").value;
+  const idea = $("idea").value.trim();
+  const vocal = voice === "Instrumental" ? "instrumental" : `${voice.toLowerCase()} vocal`;
+  return `${style} brasileiro, ${mood.toLowerCase()}, ${vocal}, produção moderna, melodia marcante, refrão forte, qualidade de estúdio. Tema: ${idea}`;
+}
+
+function makeLyrics() {
+  const idea = $("idea").value.trim();
+  if ($("voice").value === "Instrumental") return "[Instrumental]";
+  return `[Verso 1]
+${idea}
+No silêncio eu ouvi meu coração falar,
+que algumas histórias ainda vão voltar.
+
+[Pré-Refrão]
+E se o destino quiser me encontrar,
+eu vou estar aqui, pronto pra cantar.
+
+[Refrão]
+Essa história não termina assim,
+o que é de verdade não chega ao fim.
+Se a vida levou, pode devolver,
+porque eu ainda escolho você.`;
+}
+
+async function generateWithACE(prompt, lyrics) {
+  // Space comunitário de ACE-Step com API Gradio. Pode dormir/ficar ocupado; nesse caso mostramos o erro.
+  const app = await Client.connect("fffiloni/ACE-Step-API");
+  const result = await app.predict("/__call__", {
+    audio_duration: 30,
+    prompt,
+    lyrics,
+    infer_step: 16,
+    guidance_scale: 7,
+    scheduler_type: "euler",
+    cfg_type: "apg",
+    omega_scale: 10,
+    manual_seeds: null,
+    guidance_interval: 0.5,
+    guidance_interval_decay: 0,
+    min_guidance_scale: 3,
+    use_erg_tag: true,
+    use_erg_lyric: false,
+    use_erg_diffusion: true,
+    oss_steps: null,
+    guidance_scale_text: 0,
+    guidance_scale_lyric: 0,
+    audio2audio_enable: false,
+    ref_audio_strength: 0.5,
+    ref_audio_input: null,
+    lora_name_or_path: "none"
+  });
+  return result;
+}
+
+function findAudio(value) {
+  if (!value) return null;
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    for (const v of value) { const a = findAudio(v); if (a) return a; }
+  }
+  if (typeof value === "object") {
+    for (const k of ["url","path","name"]){ if (value[k]) return value[k]; }
+    for (const v of Object.values(value)) { const a = findAudio(v); if (a) return a; }
+  }
+  return null;
+}
+
+$("generate").onclick = async () => {
+  const idea = $("idea").value.trim();
+  if (!idea) { setStatus("Escreva uma ideia para a música."); $("idea").focus(); return; }
+  $("generate").disabled = true;
+  $("generate").textContent = "⏳ Criando...";
+  setStatus("Conectando à IA musical... isso pode levar alguns minutos.");
+  try {
+    const prompt = promptFromForm();
+    const lyrics = makeLyrics();
+    const result = await generateWithACE(prompt, lyrics);
+    const audio = findAudio(result);
+    if (!audio) throw new Error("A IA respondeu, mas não enviou o áudio.");
+    lastAudio = audio;
+    $("lyrics").textContent = lyrics;
+    $("audio").src = audio;
+    $("resultCard").classList.remove("hidden");
+    setStatus("Música criada. Aperte play.");
+    $("audio").play().catch(()=>{});
+  } catch(e) {
+    console.error(e);
+    setStatus("Não foi possível gerar agora: " + (e?.message || e));
+  } finally {
+    $("generate").disabled = false;
+    $("generate").textContent = "🎶 Criar música";
+  }
+};
+
+$("download").onclick = () => {
+  if (!lastAudio) return;
+  const a = document.createElement("a");
+  a.href = lastAudio; a.download = "musicIA.mp3"; a.target = "_blank"; a.rel = "noopener"; a.click();
+};
+</script>
+</body>
+</html>
