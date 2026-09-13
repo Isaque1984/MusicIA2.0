@@ -1,0 +1,147 @@
+import os, re, tempfile, shutil, uuid, inspect
+from pathlib import Path
+from fastapi import FastAPI
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+try:
+    from gradio_client import Client
+except Exception:
+    Client = None
+
+ROOT = Path(__file__).resolve().parent.parent
+FRONTEND = ROOT / "frontend"
+AUDIO_DIR = Path(tempfile.gettempdir()) / "musicia_audio"
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+
+app = FastAPI(title="MusicIA API", version="1.1")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
+
+class GenerateRequest(BaseModel):
+    idea: str
+    style: str = "Sertanejo"
+    mood: str = "Romântico"
+    voice: str = "Masculina"
+
+def build_prompt(x):
+    voice = "" if x.voice == "Instrumental" else f", {x.voice.lower()} vocal"
+    return f"{x.style} brasileiro, clima {x.mood.lower()}{voice}, produção moderna, melodia marcante, refrão forte, qualidade de estúdio. Tema: {x.idea}"
+
+def make_lyrics(x):
+    if x.voice == "Instrumental": return "[Instrumental]"
+    return (f"[Verso 1]\n{ x.idea }\nNo silêncio eu ouvi meu coração falar,\nque algumas histórias ainda vão voltar.\n\n"
+            "[Pré-Refrão]\nE se o destino quiser me encontrar,\neu vou estar aqui, pronto pra cantar.\n\n"
+            "[Refrão]\nEssa história não termina assim,\no que é de verdade não chega ao fim.\nSe a vida levou, pode devolver,\nporque eu ainda escolho você.")
+
+def _param_info(client):
+    try:
+        info = client.view_api(return_format="dict")
+        return info
+    except Exception:
+        return None
+
+def _choose_endpoint(info):
+    if not isinstance(info, dict): return "/__call__"
+    candidates = []
+    for key, value in info.items():
+        if key in ("named_endpoints", "unnamed_endpoints") and isinstance(value, dict):
+            for ep, meta in value.items():
+                name = (meta.get("description", "") + " " + ep).lower() if isinstance(meta, dict) else ep.lower()
+                if any(w in name for w in ("generate", "music", "audio")):
+                    candidates.append(ep)
+    return candidates[0] if candidates else "/__call__"
+
+def _build_args(meta, x, prompt, lyrics):
+    # Match parameters by their actual Gradio names, so the MusicIA is less dependent on a particular Space version.
+    if not isinstance(meta, dict): return None
+    params = meta.get("parameters") or meta.get("inputs") or []
+    if not isinstance(params, list): return None
+    vals = []
+    for p in params:
+        name = str(p.get("parameter_name") or p.get("name") or "").lower()
+        default = p.get("default")
+        if "lyric" in name: v = lyrics
+        elif any(k in name for k in ("caption", "prompt", "description", "tags")): v = prompt
+        elif "duration" in name: v = 30
+        elif "step" in name and "guidance" not in name: v = 16
+        elif "instrumental" in name: v = (x.voice == "Instrumental")
+        elif "language" in name: v = "pt"
+        elif "bpm" in name: v = None
+        elif "keyscale" in name or "time_signature" in name or "timesignature" in name: v = ""
+        elif "seed" in name: v = None
+        elif default is not None: v = default
+        else: v = None
+        vals.append(v)
+    return vals
+
+def call_ace(prompt, lyrics, x):
+    if Client is None:
+        raise RuntimeError("Dependência gradio_client não instalada.")
+    space = os.getenv("ACESTEP_SPACE", "fffiloni/ACE-Step-API")
+    token = os.getenv("HF_TOKEN") or None
+    client = Client(space, token=token)
+    # Endpoint/API shape verified from public ACE-Step integrations.
+    return client.predict(
+        audio_duration=30,
+        prompt=prompt,
+        lyrics=lyrics,
+        infer_step=16,
+        guidance_scale=7,
+        scheduler_type="euler",
+        cfg_type="apg",
+        omega_scale=10,
+        manual_seeds=None,
+        guidance_interval=0.5,
+        guidance_interval_decay=0,
+        min_guidance_scale=3,
+        use_erg_tag=True,
+        use_erg_lyric=False,
+        use_erg_diffusion=True,
+        oss_steps=None,
+        guidance_scale_text=0,
+        guidance_scale_lyric=0,
+        audio2audio_enable=False,
+        ref_audio_strength=0.5,
+        ref_audio_input=None,
+        lora_name_or_path="none",
+        api_name="/__call__"
+    )
+
+def copy_audio(result):
+    # Gradio may return a single file, a tuple/list, dict, or URL.
+    if isinstance(result, (list, tuple)):
+        for item in result:
+            try:
+                return copy_audio(item)
+            except Exception: pass
+        raise RuntimeError("A IA não retornou um arquivo de áudio.")
+    if isinstance(result, dict):
+        src = result.get("path") or result.get("name") or result.get("url")
+    else: src = str(result)
+    if not src: raise RuntimeError("A IA não retornou um arquivo de áudio.")
+    if src.startswith(("http://", "https://")): return src
+    p = Path(src)
+    if not p.exists(): raise RuntimeError(f"Arquivo de áudio não encontrado: {src}")
+    dst = AUDIO_DIR / f"{uuid.uuid4().hex}{p.suffix or '.wav'}"
+    shutil.copy2(p, dst)
+    return f"/api/audio/{dst.name}"
+
+@app.get("/")
+def home(): return FileResponse(FRONTEND / "index.html")
+@app.get("/health")
+def health(): return {"ok": True, "service": "MusicIA", "version": "1.1"}
+@app.get("/api/audio/{name}")
+def audio(name: str):
+    p = AUDIO_DIR / Path(name).name
+    if not p.exists(): return JSONResponse({"error":"Áudio expirado ou não encontrado."}, status_code=404)
+    return FileResponse(p)
+@app.post("/api/generate")
+def generate(req: GenerateRequest):
+    if not req.idea.strip(): return JSONResponse({"ok":False,"error":"Digite uma ideia."},status_code=400)
+    try:
+        prompt, lyrics = build_prompt(req), make_lyrics(req)
+        result = call_ace(prompt, lyrics, req)
+        return {"ok":True,"audio_url":copy_audio(result),"lyrics":lyrics,"prompt":prompt}
+    except Exception as e:
+        return JSONResponse({"ok":False,"error":f"Não consegui gerar agora: {type(e).__name__}: {e}"},status_code=502)
