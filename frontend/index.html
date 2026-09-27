@@ -1,9 +1,10 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>🎵 MusicIA</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>MusicIA</title>
 
   <style>
     * {
@@ -13,48 +14,61 @@
     body {
       margin: 0;
       min-height: 100vh;
-      background: #0b1020;
+      font-family: Arial, Helvetica, sans-serif;
+      background:
+        radial-gradient(circle at top, #172554 0%, #080b14 45%, #05070d 100%);
       color: #fff;
-      font-family: Arial, sans-serif;
       display: flex;
       justify-content: center;
-      padding: 24px;
+      align-items: center;
+      padding: 20px;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 520px;
     }
 
     .card {
-      width: min(680px, 100%);
-      background: #121a2d;
-      border: 1px solid #263453;
-      border-radius: 20px;
-      padding: 24px;
-      box-shadow: 0 15px 40px rgba(0,0,0,.3);
+      background: rgba(15, 23, 42, 0.94);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 24px;
+      padding: 25px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
     }
 
-    h1 {
-      margin: 0 0 6px;
-      font-size: 30px;
+    .logo {
+      text-align: center;
+      font-size: 34px;
+      font-weight: 800;
+      margin-bottom: 6px;
     }
 
-    p {
-      color: #aeb8cf;
-      margin-top: 0;
+    .subtitle {
+      text-align: center;
+      color: #aab4c8;
+      margin-bottom: 25px;
+      font-size: 15px;
     }
 
     label {
       display: block;
       margin: 16px 0 7px;
+      font-size: 14px;
       font-weight: bold;
+      color: #dbe4f3;
     }
 
     textarea,
     select {
       width: 100%;
-      background: #0b1020;
-      color: #fff;
-      border: 1px solid #34415f;
+      border: 1px solid #334155;
+      background: #0b1120;
+      color: white;
       border-radius: 12px;
       padding: 13px;
-      font-size: 16px;
+      font-size: 15px;
+      outline: none;
     }
 
     textarea {
@@ -62,227 +76,405 @@
       resize: vertical;
     }
 
-    .grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
+    textarea:focus,
+    select:focus {
+      border-color: #38bdf8;
     }
 
     button {
       width: 100%;
-      margin-top: 20px;
+      margin-top: 24px;
       padding: 15px;
       border: 0;
-      border-radius: 12px;
-      background: #16834a;
-      color: #fff;
-      font-size: 17px;
-      font-weight: bold;
+      border-radius: 13px;
+      background: linear-gradient(135deg, #2563eb, #06b6d4);
+      color: white;
+      font-size: 16px;
+      font-weight: 800;
       cursor: pointer;
+      transition: 0.2s;
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+      filter: brightness(1.08);
     }
 
     button:disabled {
-      opacity: .6;
+      opacity: 0.6;
       cursor: wait;
+      transform: none;
     }
 
     #status {
-      margin-top: 16px;
-      text-align: center;
-      white-space: pre-wrap;
-      color: #dce5f7;
+      margin-top: 18px;
+      padding: 12px;
+      border-radius: 10px;
+      background: rgba(255,255,255,0.04);
+      color: #cbd5e1;
+      font-size: 14px;
+      line-height: 1.5;
+      word-break: break-word;
     }
 
-    audio {
+    #audio {
       width: 100%;
       margin-top: 18px;
     }
 
-    @media (max-width: 520px) {
-      .grid {
-        grid-template-columns: 1fr;
-      }
+    .error {
+      color: #fecaca !important;
+      background: rgba(127, 29, 29, 0.28) !important;
+      border: 1px solid rgba(248,113,113,0.25);
+    }
+
+    .success {
+      color: #bbf7d0 !important;
+      background: rgba(20, 83, 45, 0.25) !important;
+      border: 1px solid rgba(74,222,128,0.2);
+    }
+
+    .loading {
+      color: #bae6fd !important;
+    }
+
+    .debug {
+      margin-top: 10px;
+      font-size: 11px;
+      color: #64748b;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 18px;
+      color: #64748b;
+      font-size: 12px;
     }
   </style>
 </head>
 
 <body>
 
+<div class="container">
+
   <div class="card">
 
-    <h1>🎵 MusicIA</h1>
+    <div class="logo">🎵 MusicIA</div>
 
-    <p>
+    <div class="subtitle">
       Transforme uma ideia em uma música.
-    </p>
-
-    <label for="idea">
-      Como você quer sua música?
-    </label>
-
-    <textarea
-      id="idea"
-      placeholder="Ex.: Um homem lutando para vencer na vida e nunca desistir"
-    >Um homem lutando para vencer na vida e nunca desistir</textarea>
-
-    <div class="grid">
-
-      <div>
-        <label for="style">Estilo</label>
-
-        <select id="style">
-          <option>Sertanejo</option>
-          <option>Funk</option>
-          <option>Trap</option>
-          <option>Rap</option>
-          <option>Pop</option>
-          <option>Rock</option>
-          <option>Gospel</option>
-          <option>Forró</option>
-          <option>MPB</option>
-        </select>
-      </div>
-
-      <div>
-        <label for="mood">Clima</label>
-
-        <select id="mood">
-          <option>Motivacional</option>
-          <option>Romântico</option>
-          <option>Triste</option>
-          <option>Alegre</option>
-          <option>Sombrio</option>
-          <option>Épico</option>
-        </select>
-      </div>
-
-      <div>
-        <label for="voice">Voz</label>
-
-        <select id="voice">
-          <option>Masculina</option>
-          <option>Feminina</option>
-          <option>Dueto</option>
-          <option>Instrumental</option>
-        </select>
-      </div>
-
     </div>
 
-    <button id="go">
+    <label for="idea">Como você quer sua música?</label>
+
+    <textarea id="idea">Um homem lutando para vencer na vida e nunca desistir</textarea>
+
+    <label for="style">Estilo</label>
+
+    <select id="style">
+      <option>Sertanejo</option>
+      <option>Funk</option>
+      <option>Trap</option>
+      <option>Rap</option>
+      <option>Pop</option>
+      <option>Rock</option>
+      <option>Gospel</option>
+      <option>Forró</option>
+      <option>MPB</option>
+    </select>
+
+    <label for="mood">Clima</label>
+
+    <select id="mood">
+      <option>Motivacional</option>
+      <option>Romântico</option>
+      <option>Triste</option>
+      <option>Alegre</option>
+      <option>Sombrio</option>
+      <option>Épico</option>
+    </select>
+
+    <label for="voice">Voz</label>
+
+    <select id="voice">
+      <option>Masculina</option>
+      <option>Feminina</option>
+      <option>Dueto</option>
+      <option>Instrumental</option>
+    </select>
+
+    <button id="generate">
       🎶 Criar música
     </button>
 
-    <div id="status"></div>
+    <div id="status">
+      Pronto para criar sua música.
+    </div>
 
-    <audio
-      id="audio"
-      controls
-      hidden
-    ></audio>
+    <audio id="audio" controls hidden></audio>
+
+    <div id="debug" class="debug" hidden></div>
+
+    <div class="footer">
+      MusicIA • Geração musical com inteligência artificial
+    </div>
 
   </div>
 
+</div>
+
 <script>
+  const $ = (id) => document.getElementById(id);
 
-const $ = id => document.getElementById(id);
+  function limparHTML(texto) {
+    const temp = document.createElement("div");
+    temp.innerHTML = texto;
 
-$("go").onclick = async () => {
-
-  const idea = $("idea").value.trim();
-
-  if (!idea) {
-    $("status").textContent =
-      "⚠️ Digite uma ideia para a música.";
-    return;
+    return (temp.textContent || temp.innerText || "")
+      .replace(/\s+/g, " ")
+      .trim();
   }
 
-  $("go").disabled = true;
+  function limitar(texto, limite = 1200) {
+    if (!texto) return "";
+    return texto.length > limite
+      ? texto.substring(0, limite) + "..."
+      : texto;
+  }
 
-  $("status").textContent =
-    "⏳ Criando sua música...\nIsso pode levar alguns minutos.";
-
-  $("audio").hidden = true;
-  $("audio").removeAttribute("src");
-
-  try {
-
-    const response = await fetch(
-      "/api/generate",
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json"
-        },
-
-        body: JSON.stringify({
-          idea: idea,
-          style: $("style").value,
-          mood: $("mood").value,
-          voice: $("voice").value
-        })
-      }
-    );
+  async function lerResposta(response) {
 
     const contentType =
       response.headers.get("content-type") || "";
 
-    if (contentType.startsWith("audio/")) {
+    /*
+      IMPORTANTE:
+      Primeiro lemos como texto.
+      Assim não acontece mais o erro:
+      Unexpected token '<'
+    */
 
-      const blob = await response.blob();
+    const texto = await response.text();
 
-      $("audio").src =
-        URL.createObjectURL(blob);
-
-      $("audio").hidden = false;
-
-      $("status").textContent =
-        "✅ Música criada!";
-
-    } else {
-
-      const data = await response.json();
-
-      if (!response.ok) {
-
-        throw new Error(
-          data.detail || "Erro desconhecido"
-        );
-
-      }
-
-      if (!data.audio) {
-
-        throw new Error(
-          "A IA não retornou o áudio."
-        );
-
-      }
-
-      $("audio").src = data.audio;
-
-      $("audio").hidden = false;
-
-      $("status").textContent =
-        "✅ Música criada!";
-    }
-
-  } catch (error) {
-
-    $("status").textContent =
-      "❌ Não foi possível gerar: " +
-      error.message;
-
-  } finally {
-
-    $("go").disabled = false;
-
+    return {
+      status: response.status,
+      contentType: contentType,
+      texto: texto
+    };
   }
 
-};
+  async function gerarMusica() {
+
+    const button = $("generate");
+    const status = $("status");
+    const audio = $("audio");
+    const debug = $("debug");
+
+    const idea = $("idea").value.trim();
+    const style = $("style").value;
+    const mood = $("mood").value;
+    const voice = $("voice").value;
+
+    if (!idea) {
+      status.className = "error";
+      status.textContent = "❌ Digite uma ideia para sua música.";
+      return;
+    }
+
+    button.disabled = true;
+
+    audio.hidden = true;
+    audio.removeAttribute("src");
+
+    debug.hidden = true;
+    debug.textContent = "";
+
+    status.className = "loading";
+    status.textContent =
+      "⏳ Criando sua música... Isso pode levar alguns minutos.";
+
+    try {
+
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "audio/*, application/json, text/plain, text/html, */*"
+        },
+        body: JSON.stringify({
+          idea: idea,
+          style: style,
+          mood: mood,
+          voice: voice
+        })
+      });
+
+      const resultado = await lerResposta(response);
+
+      console.log("MusicIA resposta:", resultado);
+
+      /*
+        CASO 1:
+        O backend devolveu áudio diretamente.
+      */
+
+      if (
+        resultado.contentType &&
+        resultado.contentType.toLowerCase().startsWith("audio/")
+      ) {
+
+        /*
+          Como já consumimos o body como texto,
+          fazemos uma nova requisição para obter o Blob.
+        */
+
+        const audioResponse = await fetch("/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "audio/*"
+          },
+          body: JSON.stringify({
+            idea: idea,
+            style: style,
+            mood: mood,
+            voice: voice
+          })
+        });
+
+        if (!audioResponse.ok) {
+          throw new Error(
+            "Servidor respondeu HTTP " +
+            audioResponse.status
+          );
+        }
+
+        const blob = await audioResponse.blob();
+
+        if (!blob || blob.size === 0) {
+          throw new Error("O servidor retornou um áudio vazio.");
+        }
+
+        audio.src = URL.createObjectURL(blob);
+        audio.hidden = false;
+
+        status.className = "success";
+        status.textContent = "✅ Música criada!";
+
+        return;
+      }
+
+      /*
+        CASO 2:
+        Resposta JSON.
+      */
+
+      if (
+        resultado.contentType.toLowerCase().includes("application/json")
+      ) {
+
+        let data;
+
+        try {
+          data = JSON.parse(resultado.texto);
+        } catch (jsonError) {
+
+          throw new Error(
+            "O servidor informou JSON, mas enviou uma resposta inválida."
+          );
+        }
+
+        if (!responseOk(response)) {
+          throw new Error(
+            data.detail ||
+            data.message ||
+            "Erro HTTP " + resultado.status
+          );
+        }
+
+        if (data.audio) {
+
+          audio.src = data.audio;
+          audio.hidden = false;
+
+          status.className = "success";
+          status.textContent = "✅ Música criada!";
+
+          return;
+        }
+
+        throw new Error(
+          data.detail ||
+          data.message ||
+          "A IA não retornou o áudio."
+        );
+      }
+
+      /*
+        CASO 3:
+        HTML ou texto.
+        Aqui está a correção principal.
+      */
+
+      const mensagem = limparHTML(resultado.texto);
+
+      let erro = mensagem;
+
+      if (!erro) {
+        erro =
+          "O servidor retornou uma resposta vazia.";
+      }
+
+      erro = limitar(erro);
+
+      throw new Error(
+        "HTTP " +
+        resultado.status +
+        " — " +
+        erro
+      );
+
+    } catch (error) {
+
+      console.error("MusicIA erro:", error);
+
+      status.className = "error";
+
+      status.textContent =
+        "❌ Não foi possível gerar: " +
+        (error.message || error);
+
+      /*
+        Mostra detalhes técnicos pequenos
+        para facilitar o diagnóstico.
+      */
+
+      debug.hidden = false;
+
+      debug.textContent =
+        "Detalhes técnicos:\n" +
+        "Endpoint: /api/generate\n" +
+        "Status: verifique a mensagem acima.\n" +
+        "Se aparecer uma mensagem do Render/ACE-Step, me envie exatamente ela.";
+
+    } finally {
+
+      button.disabled = false;
+    }
+  }
+
+  function responseOk(response) {
+    return response.status >= 200 && response.status < 300;
+  }
+
+  $("generate").addEventListener(
+    "click",
+    gerarMusica
+  );
 
 </script>
 
 </body>
-  </html>
+</html>
