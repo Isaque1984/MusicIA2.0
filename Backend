@@ -1,8 +1,10 @@
 import os
-import tempfile
+import json
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
+from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
@@ -10,14 +12,45 @@ from pydantic import BaseModel
 from gradio_client import Client
 
 
-app = FastAPI(title="MusicIA API", version="2.0")
+# ============================================================
+# MUSICIA 2.0
+# Backend
+# ============================================================
+
+app = FastAPI(
+    title="MusicIA API",
+    version="2.0"
+)
+
+
+# ============================================================
+# DIRETÓRIOS
+# ============================================================
 
 AUDIO_DIR = Path(tempfile.gettempdir()) / "musicia_audio"
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
-# ACE-Step oficial
-client = Client("ACE-Step/Ace-Step-v1.5")
 
+# ============================================================
+# ACE-STEP
+# ============================================================
+
+SPACE = "ACE-Step/Ace-Step-v1.5"
+
+print("==========================================", flush=True)
+print("MUSICIA - CONECTANDO AO ACE-STEP", flush=True)
+print("SPACE:", SPACE, flush=True)
+print("==========================================", flush=True)
+
+client = Client(
+    SPACE,
+    verbose=True
+)
+
+
+# ============================================================
+# MODELO DA REQUISIÇÃO
+# ============================================================
 
 class GenerateRequest(BaseModel):
     idea: str
@@ -26,70 +59,199 @@ class GenerateRequest(BaseModel):
     voice: str = "Masculina"
 
 
+# ============================================================
+# UTILITÁRIOS
+# ============================================================
+
+def safe_text(value: Any) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, str):
+        return value
+
+    try:
+        return str(value)
+    except Exception:
+        return ""
+
+
+def is_url(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and (
+            value.startswith("http://")
+            or value.startswith("https://")
+        )
+    )
+
+
+def is_file(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and os.path.isfile(value)
+    )
+
+
+# ============================================================
+# PROCURA ÁUDIO NO RESULTADO
+# ============================================================
+
 def extract_audio(result):
     """
-    Procura o arquivo de áudio dentro das várias formas
-    que o Gradio pode devolver.
+    Procura recursivamente um arquivo ou URL de áudio
+    dentro do resultado devolvido pelo Gradio.
     """
 
+    if result is None:
+        return None
+
+    # String
+    if isinstance(result, str):
+
+        if is_url(result):
+            return result
+
+        if is_file(result):
+            return result
+
+        return None
+
+    # Dict
     if isinstance(result, dict):
 
-        for key in ["url", "path", "name"]:
-            value = result.get(key)
+        # Prioridade para campos conhecidos
+        priority_keys = [
+            "audio",
+            "audio_url",
+            "url",
+            "path",
+            "filepath",
+            "file",
+            "name",
+            "value"
+        ]
 
-            if isinstance(value, str):
+        for key in priority_keys:
 
-                if value.startswith("http://") or value.startswith("https://"):
-                    return value
+            if key in result:
 
-                if os.path.isfile(value):
-                    return value
+                found = extract_audio(
+                    result[key]
+                )
 
+                if found:
+                    return found
+
+        # Procura em tudo
         for value in result.values():
+
             found = extract_audio(value)
 
             if found:
                 return found
 
-    elif isinstance(result, (list, tuple)):
+        return None
+
+    # Lista / tupla
+    if isinstance(result, (list, tuple)):
 
         for value in result:
+
             found = extract_audio(value)
 
             if found:
                 return found
 
-    elif isinstance(result, str):
+        return None
 
-        if result.startswith("http://") or result.startswith("https://"):
-            return result
+    # Objetos do Gradio / dataclasses
+    for attr in [
+        "path",
+        "url",
+        "name",
+        "filepath"
+    ]:
 
-        if os.path.isfile(result):
-            return result
+        try:
+
+            value = getattr(
+                result,
+                attr,
+                None
+            )
+
+            found = extract_audio(value)
+
+            if found:
+                return found
+
+        except Exception:
+            pass
+
+    # Tenta converter objetos para dict
+    try:
+
+        if hasattr(result, "__dict__"):
+
+            found = extract_audio(
+                vars(result)
+            )
+
+            if found:
+                return found
+
+    except Exception:
+        pass
 
     return None
 
 
-def create_prompt(request):
+# ============================================================
+# CRIA PROMPT
+# ============================================================
+
+def create_prompt(request: GenerateRequest) -> str:
+
+    voice_map = {
+        "Masculina": "male vocal",
+        "Feminina": "female vocal",
+        "Dueto": "male and female duet",
+        "Instrumental": "instrumental, no vocals"
+    }
+
+    voice = voice_map.get(
+        request.voice,
+        request.voice
+    )
+
     return (
         f"{request.style} brasileiro, "
-        f"clima {request.mood.lower()}, "
-        f"voz {request.voice.lower()}, "
-        f"música em português do Brasil, "
-        f"produção moderna, "
-        f"melodia marcante, "
-        f"refrão forte e emocionante. "
+        f"{request.mood.lower()}, "
+        f"{voice}, "
+        "música em português do Brasil, "
+        "produção musical moderna, "
+        "melodia marcante, "
+        "estrutura profissional, "
+        "refrão forte e emocionante. "
         f"Tema principal: {request.idea}"
     )
 
 
-def create_lyrics(request):
+# ============================================================
+# LETRA
+# ============================================================
+
+def create_lyrics(request: GenerateRequest) -> str:
 
     if request.voice == "Instrumental":
-        return "[Instrumental]"
+        return ""
 
-    return f"""[Verso 1]
-{request.idea}
+    idea = request.idea.strip()
+
+    return f"""
+[Verso 1]
+{idea}
 Eu já caí, mas levantei
 Mesmo sofrendo, eu continuei
 A vida tentou me derrubar
@@ -105,7 +267,7 @@ Eu vou lutar até conseguir
 Eu não vou desistir
 Enquanto houver força em mim
 Eu vou lutar, eu vou seguir
-Até chegar no meu fim
+Até chegar ao meu fim
 
 Se a vida fechar uma porta
 Eu vou procurar outra saída
@@ -118,212 +280,542 @@ Já pensei em parar
 Mas dentro do meu peito
 Ainda existe vontade de lutar
 
+[Pré-Refrão]
+Eu sei que ainda vai chegar
+O dia que eu vou vencer
+Enquanto existir esperança
+Eu não vou deixar de crer
+
 [Refrão]
 Eu não vou desistir
 Enquanto houver força em mim
 Eu vou lutar, eu vou seguir
-Até chegar no meu fim
+Até chegar ao meu fim
+
+[Final]
+Eu posso cair
+Eu posso sofrer
+Mas enquanto eu respirar
+Eu vou lutar pra vencer
 """
 
 
-def generate_music(request):
+# ============================================================
+# OBTÉM INFORMAÇÕES DO ENDPOINT
+# ============================================================
+
+def get_generation_api():
+
+    print(
+        "Consultando API real do ACE-Step...",
+        flush=True
+    )
+
+    info = client.view_api(
+        return_format="dict"
+    )
+
+    print(
+        "========== API DO ACE-STEP ==========",
+        flush=True
+    )
+
+    try:
+        print(
+            json.dumps(
+                info,
+                ensure_ascii=False,
+                indent=2,
+                default=str
+            ),
+            flush=True
+        )
+    except Exception:
+        print(
+            repr(info),
+            flush=True
+        )
+
+    print(
+        "======================================",
+        flush=True
+    )
+
+    endpoints = {}
+
+    if isinstance(info, dict):
+
+        endpoints = info.get(
+            "named_endpoints",
+            {}
+        )
+
+    endpoint = (
+        endpoints.get(
+            "/generation_wrapper"
+        )
+    )
+
+    if endpoint is None:
+
+        # Procura variações
+        for name, data in endpoints.items():
+
+            if (
+                "generation" in name.lower()
+                or "wrapper" in name.lower()
+            ):
+
+                endpoint = data
+
+                print(
+                    f"Endpoint encontrado: {name}",
+                    flush=True
+                )
+
+                return name, endpoint
+
+    if endpoint is None:
+
+        raise RuntimeError(
+            "O endpoint /generation_wrapper "
+            "não foi encontrado no ACE-Step."
+        )
+
+    return "/generation_wrapper", endpoint
+
+
+# ============================================================
+# PEGA NOME DO PARÂMETRO
+# ============================================================
+
+def parameter_name(parameter, index):
+
+    if not isinstance(parameter, dict):
+        return f"param_{index + 1}"
+
+    for key in [
+        "parameter_name",
+        "name",
+        "label"
+    ]:
+
+        value = parameter.get(key)
+
+        if isinstance(value, str):
+            return value
+
+    return f"param_{index + 1}"
+
+
+# ============================================================
+# PEGA VALOR PADRÃO
+# ============================================================
+
+def parameter_default(parameter):
+
+    if not isinstance(parameter, dict):
+        return None, False
+
+    # Formas usadas por versões diferentes do Gradio
+    for key in [
+        "parameter_default",
+        "default",
+        "example_input"
+    ]:
+
+        if key in parameter:
+
+            value = parameter.get(key)
+
+            if value is not None:
+                return value, True
+
+    # Algumas versões informam explicitamente
+    # se existe default
+    if parameter.get(
+        "parameter_has_default"
+    ):
+
+        if "parameter_default" in parameter:
+
+            return (
+                parameter.get(
+                    "parameter_default"
+                ),
+                True
+            )
+
+    return None, False
+
+
+# ============================================================
+# INFERÊNCIA DE VALOR SE O ENDPOINT NÃO INFORMAR DEFAULT
+# ============================================================
+
+def fallback_value(parameter, index):
+
+    if not isinstance(parameter, dict):
+        return None
+
+    name = (
+        parameter_name(
+            parameter,
+            index
+        )
+        .lower()
+    )
+
+    component = safe_text(
+        parameter.get(
+            "component",
+            ""
+        )
+    ).lower()
+
+    ptype = safe_text(
+        parameter.get(
+            "type",
+            ""
+        )
+    ).lower()
+
+    description = safe_text(
+        parameter.get(
+            "description",
+            ""
+        )
+    ).lower()
+
+    text = (
+        name
+        + " "
+        + component
+        + " "
+        + ptype
+        + " "
+        + description
+    )
+
+    # Listas
+    if (
+        "list" in ptype
+        or "checkboxgroup" in component
+    ):
+        return []
+
+    # Booleanos
+    if (
+        "bool" in ptype
+        or "checkbox" in component
+    ):
+        return False
+
+    # Inteiros
+    if (
+        "int" in ptype
+        or "integer" in ptype
+        or "number" in component
+    ):
+
+        if "batch" in text:
+            return 1
+
+        if "step" in text:
+            return 8
+
+        if "index" in text:
+            return 0
+
+        return 0
+
+    # Números decimais
+    if (
+        "float" in ptype
+        or "slider" in component
+    ):
+
+        if (
+            "scale" in text
+            or "strength" in text
+        ):
+            return 1.0
+
+        if "temperature" in text:
+            return 0.85
+
+        if "top_p" in text:
+            return 0.9
+
+        return 0.0
+
+    # Estados / objetos
+    if "state" in component:
+        return {}
+
+    # Arquivos
+    if (
+        "audio" in text
+        or "file" in component
+    ):
+        return None
+
+    # Strings
+    return ""
+
+
+# ============================================================
+# MONTA ARGUMENTOS DINAMICAMENTE
+# ============================================================
+
+def build_generation_kwargs(
+    request: GenerateRequest
+):
+
+    endpoint_name, endpoint = (
+        get_generation_api()
+    )
+
+    parameters = []
+
+    if isinstance(endpoint, dict):
+
+        parameters = endpoint.get(
+            "parameters",
+            []
+        )
+
+    if not parameters:
+
+        raise RuntimeError(
+            "O ACE-Step não informou os "
+            "parâmetros do generation_wrapper."
+        )
 
     prompt = create_prompt(request)
     lyrics = create_lyrics(request)
 
-    print("====================================", flush=True)
-    print("MUSICA IA - NOVA GERACAO", flush=True)
-    print("PROMPT:", prompt, flush=True)
-    print("LYRICS:", lyrics, flush=True)
-    print("====================================", flush=True)
+    kwargs = {}
 
-    # ==========================================================
-    # ACE-STEP v1.5
-    #
-    # Ordem baseada na geração atual do ACE-Step.
-    # ==========================================================
+    print(
+        "========== MONTANDO PARÂMETROS ==========",
+        flush=True
+    )
 
-    args = [
+    for index, parameter in enumerate(
+        parameters
+    ):
 
-        # 0
-        "acestep-v15-turbo",
+        name = parameter_name(
+            parameter,
+            index
+        )
 
-        # 1
-        "simple",
+        default, has_default = (
+            parameter_default(
+                parameter
+            )
+        )
 
-        # 2
-        prompt,
+        if has_default:
+            value = default
+        else:
+            value = fallback_value(
+                parameter,
+                index
+            )
 
-        # 3
-        "pt",
+        lower = name.lower()
 
-        # 4 captions
-        prompt,
+        # ----------------------------------------------------
+        # CAMPOS PRINCIPAIS
+        # ----------------------------------------------------
 
-        # 5 lyrics
-        lyrics,
+        if (
+            lower
+            in [
+                "simple_query_input",
+                "query",
+                "prompt"
+            ]
+        ):
+            value = prompt
 
-        # 6 bpm
-        None,
+        elif (
+            "simple_vocal_language"
+            in lower
+        ):
+            value = "pt"
 
-        # 7 key_scale
-        "",
+        elif (
+            lower
+            in [
+                "caption",
+                "simple_caption"
+            ]
+        ):
+            value = prompt
 
-        # 8 time_signature
-        "",
+        elif lower == "lyrics":
+            value = lyrics
 
-        # 9 vocal_language
-        "pt",
+        elif lower == "vocal_language":
+            value = "pt"
 
-        # 10 inference_steps
-        8,
+        # ----------------------------------------------------
+        # FORMATO / TAREFA
+        # ----------------------------------------------------
 
-        # 11 guidance_scale
-        7.0,
+        elif lower == "task_type":
+            value = "text2music"
 
-        # 12 random_seed_checkbox
-        True,
+        elif lower == "audio_format":
+            value = "mp3"
 
-        # 13 seed
-        "-1",
+        # ----------------------------------------------------
+        # MODELO
+        # ----------------------------------------------------
 
-        # 14 reference_audio
-        None,
+        elif lower == "selected_model":
+            value = "acestep-v15-turbo"
 
-        # 15 audio_duration
-        -1,
+        elif lower == "generation_mode":
+            value = "simple"
 
-        # 16 batch_size_input
-        1,
+        # ----------------------------------------------------
+        # CONFIGURAÇÕES SEGURAS
+        # ----------------------------------------------------
 
-        # 17 src_audio
-        None,
+        # Nunca deixar False cair em campo numérico.
+        if (
+            isinstance(value, bool)
+            and (
+                "scale" in lower
+                or "strength" in lower
+                or "temperature" in lower
+                or "duration" in lower
+                or "bpm" in lower
+                or "step" in lower
+                or "shift" in lower
+            )
+        ):
 
-        # 18 text2music_audio_code_string
-        "",
+            value = fallback_value(
+                parameter,
+                index
+            )
 
-        # 19 repainting_start
-        0.0,
+        kwargs[name] = value
 
-        # 20 repainting_end
-        -1,
+        print(
+            f"[{index}] {name} = {repr(value)}",
+            flush=True
+        )
 
-        # 21 instruction_display_gen
-        "Fill the audio semantic mask based on the given conditions:",
+    print(
+        "==========================================",
+        flush=True
+    )
 
-        # 22 audio_cover_strength
-        1.0,
+    print(
+        "TOTAL KWARGS:",
+        len(kwargs),
+        flush=True
+    )
 
-        # 23 task_type
-        "text2music",
+    return endpoint_name, kwargs
 
-        # 24 use_adg
-        False,
 
-        # 25 cfg_interval_start
-        0.0,
+# ============================================================
+# GERAÇÃO
+# ============================================================
 
-        # 26 cfg_interval_end
-        1.0,
+def generate_music(
+    request: GenerateRequest
+):
 
-        # 27 shift
-        3.0,
+    endpoint_name, kwargs = (
+        build_generation_kwargs(
+            request
+        )
+    )
 
-        # 28 infer_method
-        "ode",
+    print(
+        "==========================================",
+        flush=True
+    )
 
-        # 29 custom_timesteps
-        "",
+    print(
+        "INICIANDO GERAÇÃO",
+        flush=True
+    )
 
-        # 30 audio_format
-        "mp3",
+    print(
+        "ENDPOINT:",
+        endpoint_name,
+        flush=True
+    )
 
-        # 31 lm_temperature
-        0.85,
+    print(
+        "IDEIA:",
+        request.idea,
+        flush=True
+    )
 
-        # 32 think_checkbox
-        True,
+    print(
+        "ESTILO:",
+        request.style,
+        flush=True
+    )
 
-        # 33 lm_cfg_scale
-        2.0,
+    print(
+        "CLIMA:",
+        request.mood,
+        flush=True
+    )
 
-        # 34 lm_top_k
-        0,
+    print(
+        "VOZ:",
+        request.voice,
+        flush=True
+    )
 
-        # 35 lm_top_p
-        0.9,
-
-        # 36 lm_negative_prompt
-        "NO USER INPUT",
-
-        # 37 use_cot_metas
-        True,
-
-        # 38 use_cot_caption
-        True,
-
-        # 39 use_cot_language
-        True,
-
-        # 40 is_format_caption_state
-        False,
-
-        # 41 constrained_decoding_debug
-        False,
-
-        # 42 allow_lm_batch
-        True,
-
-        # 43 auto_score
-        False,
-
-        # 44 auto_lrc
-        False,
-
-        # 45 score_scale
-        0.5,
-
-        # 46 lm_batch_chunk_size
-        8,
-
-        # 47 track_name
-        None,
-
-        # 48 complete_track_classes
-        [],
-
-        # 49 autogen_checkbox
-        False,
-
-        # 50 current_batch_index
-        0,
-
-        # 51 total_batches
-        1,
-
-        # 52 batch_queue
-        [],
-
-        # 53 generation_params_state
-        {}
-    ]
-
-    print("TOTAL DE PARAMETROS:", len(args), flush=True)
+    print(
+        "==========================================",
+        flush=True
+    )
 
     try:
 
         result = client.predict(
-            *args,
-            api_name="/generation_wrapper"
+            api_name=endpoint_name,
+            **kwargs
         )
 
-        print("RESULTADO ACE-STEP:", repr(result), flush=True)
+        print(
+            "========== RESULTADO ==========",
+            flush=True
+        )
 
-        audio = extract_audio(result)
+        print(
+            repr(result),
+            flush=True
+        )
+
+        print(
+            "================================",
+            flush=True
+        )
+
+        audio = extract_audio(
+            result
+        )
 
         if not audio:
+
             raise RuntimeError(
-                "O ACE-Step respondeu, mas não retornou um arquivo de áudio."
+                "O ACE-Step respondeu, "
+                "mas não retornou áudio."
             )
 
         return audio
@@ -331,36 +823,74 @@ def generate_music(request):
     except Exception as error:
 
         print(
+            "==========================================",
+            flush=True
+        )
+
+        print(
             "ERRO ACE-STEP:",
             repr(error),
+            flush=True
+        )
+
+        print(
+            "==========================================",
             flush=True
         )
 
         raise
 
 
-@app.get("/", response_class=HTMLResponse)
+# ============================================================
+# FRONTEND
+# ============================================================
+
+@app.get(
+    "/",
+    response_class=HTMLResponse
+)
 def home():
 
-    frontend = Path(__file__).parent / "frontend" / "index.html"
+    # O Render copia o arquivo Frontend
+    # para frontend/index.html
+    frontend = (
+        Path(__file__).parent
+        / "frontend"
+        / "index.html"
+    )
 
     if frontend.exists():
-        return frontend.read_text(encoding="utf-8")
+
+        return frontend.read_text(
+            encoding="utf-8"
+        )
 
     return """
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport"
+              content="width=device-width,initial-scale=1">
         <title>MusicIA</title>
     </head>
+
     <body>
+
         <h1>🎵 MusicIA</h1>
-        <p>Frontend não encontrado.</p>
+
+        <p>
+            Frontend não encontrado.
+        </p>
+
     </body>
     </html>
     """
 
+
+# ============================================================
+# HEALTH
+# ============================================================
 
 @app.get("/health")
 def health():
@@ -368,12 +898,19 @@ def health():
     return {
         "ok": True,
         "service": "MusicIA",
-        "version": "2.0"
+        "version": "2.0",
+        "engine": "ACE-Step v1.5"
     }
 
 
+# ============================================================
+# API DE GERAÇÃO
+# ============================================================
+
 @app.post("/api/generate")
-def generate(request: GenerateRequest):
+def generate(
+    request: GenerateRequest
+):
 
     if not request.idea.strip():
 
@@ -384,40 +921,68 @@ def generate(request: GenerateRequest):
 
     try:
 
-        audio = generate_music(request)
-
-        # Se o Gradio devolver URL
-        if isinstance(audio, str):
-
-            if audio.startswith("http://") or audio.startswith("https://"):
-                return {
-                    "ok": True,
-                    "audio": audio
-                }
-
-            # Arquivo local
-            if os.path.isfile(audio):
-
-                extension = Path(audio).suffix or ".mp3"
-
-                destination = (
-                    AUDIO_DIR /
-                    f"{uuid.uuid4().hex}{extension}"
-                )
-
-                shutil.copy2(audio, destination)
-
-                return FileResponse(
-                    destination,
-                    media_type="audio/mpeg",
-                    filename="musicia.mp3"
-                )
-
-        raise RuntimeError(
-            "Não foi possível localizar o áudio gerado."
+        audio = generate_music(
+            request
         )
 
+        # URL
+        if is_url(audio):
+
+            return {
+                "ok": True,
+                "audio": audio
+            }
+
+        # Arquivo local
+        if is_file(audio):
+
+            extension = (
+                Path(audio).suffix
+                or ".mp3"
+            )
+
+            destination = (
+                AUDIO_DIR
+                / f"{uuid.uuid4().hex}{extension}"
+            )
+
+            shutil.copy2(
+                audio,
+                destination
+            )
+
+            media_type = "audio/mpeg"
+
+            if extension.lower() == ".wav":
+                media_type = "audio/wav"
+
+            elif extension.lower() == ".ogg":
+                media_type = "audio/ogg"
+
+            return FileResponse(
+                destination,
+                media_type=media_type,
+                filename=(
+                    "musicia"
+                    + extension
+                )
+            )
+
+        raise RuntimeError(
+            "O áudio foi gerado, "
+            "mas não foi possível localizar "
+            "o arquivo retornado."
+        )
+
+    except HTTPException:
+        raise
+
     except Exception as error:
+
+        print(
+            "==========================================",
+            flush=True
+        )
 
         print(
             "ERRO FINAL:",
@@ -425,11 +990,23 @@ def generate(request: GenerateRequest):
             flush=True
         )
 
-        raise HTTPException(
-            status_code=500,
-            detail=f"{type(error).__name__}: {error}"
+        print(
+            "==========================================",
+            flush=True
         )
 
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"{type(error).__name__}: "
+                f"{error}"
+            )
+        )
+
+
+# ============================================================
+# START
+# ============================================================
 
 if __name__ == "__main__":
 
