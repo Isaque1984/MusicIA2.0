@@ -47,8 +47,16 @@
     .subtitle {
       text-align: center;
       color: #aab4c8;
-      margin-bottom: 25px;
+      margin-bottom: 8px;
       font-size: 15px;
+    }
+
+    .duration-info {
+      text-align: center;
+      color: #38bdf8;
+      font-size: 13px;
+      margin-bottom: 25px;
+      font-weight: 600;
     }
 
     label {
@@ -167,11 +175,19 @@
       Transforme uma ideia em uma música.
     </div>
 
-    <label for="idea">Como você quer sua música?</label>
+    <div class="duration-info">
+      🎶 Crie músicas de até 60 segundos
+    </div>
+
+    <label for="idea">
+      Como você quer sua música?
+    </label>
 
     <textarea id="idea">Um homem lutando para vencer na vida e nunca desistir</textarea>
 
-    <label for="style">Estilo</label>
+    <label for="style">
+      Estilo
+    </label>
 
     <select id="style">
       <option>Sertanejo</option>
@@ -185,7 +201,9 @@
       <option>MPB</option>
     </select>
 
-    <label for="mood">Clima</label>
+    <label for="mood">
+      Clima
+    </label>
 
     <select id="mood">
       <option>Motivacional</option>
@@ -196,13 +214,39 @@
       <option>Épico</option>
     </select>
 
-    <label for="voice">Voz</label>
+    <label for="voice">
+      Voz
+    </label>
 
     <select id="voice">
       <option>Masculina</option>
       <option>Feminina</option>
       <option>Dueto</option>
       <option>Instrumental</option>
+    </select>
+
+    <label for="duration">
+      Duração da música
+    </label>
+
+    <select id="duration">
+
+      <option value="10" selected>
+        10 segundos
+      </option>
+
+      <option value="15">
+        15 segundos
+      </option>
+
+      <option value="30">
+        30 segundos
+      </option>
+
+      <option value="60">
+        60 segundos
+      </option>
+
     </select>
 
     <button id="generate">
@@ -226,37 +270,49 @@
 </div>
 
 <script>
-  const $ = (id) => document.getElementById(id);
+
+  const $ = (id) =>
+    document.getElementById(id);
+
 
   function limparHTML(texto) {
-    const temp = document.createElement("div");
+
+    const temp =
+      document.createElement("div");
+
     temp.innerHTML = texto;
 
-    return (temp.textContent || temp.innerText || "")
+    return (
+      temp.textContent ||
+      temp.innerText ||
+      ""
+    )
       .replace(/\s+/g, " ")
       .trim();
   }
 
-  function limitar(texto, limite = 1200) {
-    if (!texto) return "";
+
+  function limitar(
+    texto,
+    limite = 1200
+  ) {
+
+    if (!texto)
+      return "";
+
     return texto.length > limite
       ? texto.substring(0, limite) + "..."
       : texto;
   }
+
 
   async function lerResposta(response) {
 
     const contentType =
       response.headers.get("content-type") || "";
 
-    /*
-      IMPORTANTE:
-      Primeiro lemos como texto.
-      Assim não acontece mais o erro:
-      Unexpected token '<'
-    */
-
-    const texto = await response.text();
+    const texto =
+      await response.text();
 
     return {
       status: response.status,
@@ -265,106 +321,217 @@
     };
   }
 
+
   async function gerarMusica() {
 
-    const button = $("generate");
-    const status = $("status");
-    const audio = $("audio");
-    const debug = $("debug");
+    const button =
+      $("generate");
 
-    const idea = $("idea").value.trim();
-    const style = $("style").value;
-    const mood = $("mood").value;
-    const voice = $("voice").value;
+    const status =
+      $("status");
 
-    if (!idea) {
+    const audio =
+      $("audio");
+
+    const debug =
+      $("debug");
+
+
+    const idea =
+      $("idea").value.trim();
+
+    const style =
+      $("style").value;
+
+    const mood =
+      $("mood").value;
+
+    const voice =
+      $("voice").value;
+
+    const duration =
+      Number($("duration").value);
+
+
+    if (
+      ![10, 15, 30, 60]
+        .includes(duration)
+    ) {
+
       status.className = "error";
-      status.textContent = "❌ Digite uma ideia para sua música.";
+
+      status.textContent =
+        "❌ Escolha uma duração válida.";
+
       return;
     }
 
+
+    if (!idea) {
+
+      status.className = "error";
+
+      status.textContent =
+        "❌ Digite uma ideia para sua música.";
+
+      return;
+    }
+
+
     button.disabled = true;
 
+
     audio.hidden = true;
+
     audio.removeAttribute("src");
 
+
     debug.hidden = true;
+
     debug.textContent = "";
 
+
     status.className = "loading";
+
     status.textContent =
-      "⏳ Criando sua música... Isso pode levar alguns minutos.";
+      "⏳ Criando sua música de " +
+      duration +
+      " segundos...";
+
 
     try {
 
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "audio/*, application/json, text/plain, text/html, */*"
-        },
-        body: JSON.stringify({
-          idea: idea,
-          style: style,
-          mood: mood,
-          voice: voice
-        })
-      });
+      const response =
+        await fetch(
+          "/api/generate",
+          {
+            method: "POST",
 
-      const resultado = await lerResposta(response);
+            headers: {
+              "Content-Type":
+                "application/json",
 
-      console.log("MusicIA resposta:", resultado);
+              "Accept":
+                "audio/*, application/json, text/plain, text/html, */*"
+            },
+
+            body: JSON.stringify({
+
+              idea: idea,
+
+              style: style,
+
+              mood: mood,
+
+              voice: voice,
+
+              duration: duration
+
+            })
+          }
+        );
+
+
+      const resultado =
+        await lerResposta(response);
+
+
+      console.log(
+        "MusicIA resposta:",
+        resultado
+      );
+
 
       /*
         CASO 1:
-        O backend devolveu áudio diretamente.
+        Backend devolveu áudio.
       */
 
       if (
         resultado.contentType &&
-        resultado.contentType.toLowerCase().startsWith("audio/")
+        resultado.contentType
+          .toLowerCase()
+          .startsWith("audio/")
       ) {
 
         /*
-          Como já consumimos o body como texto,
-          fazemos uma nova requisição para obter o Blob.
+          Fazemos uma nova requisição
+          para obter o Blob.
         */
 
-        const audioResponse = await fetch("/api/generate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Accept": "audio/*"
-          },
-          body: JSON.stringify({
-            idea: idea,
-            style: style,
-            mood: mood,
-            voice: voice
-          })
-        });
+        const audioResponse =
+          await fetch(
+            "/api/generate",
+            {
+              method: "POST",
+
+              headers: {
+                "Content-Type":
+                  "application/json",
+
+                "Accept":
+                  "audio/*"
+              },
+
+              body: JSON.stringify({
+
+                idea: idea,
+
+                style: style,
+
+                mood: mood,
+
+                voice: voice,
+
+                duration: duration
+
+              })
+            }
+          );
+
 
         if (!audioResponse.ok) {
+
           throw new Error(
             "Servidor respondeu HTTP " +
             audioResponse.status
           );
         }
 
-        const blob = await audioResponse.blob();
 
-        if (!blob || blob.size === 0) {
-          throw new Error("O servidor retornou um áudio vazio.");
+        const blob =
+          await audioResponse.blob();
+
+
+        if (
+          !blob ||
+          blob.size === 0
+        ) {
+
+          throw new Error(
+            "O servidor retornou um áudio vazio."
+          );
         }
 
-        audio.src = URL.createObjectURL(blob);
+
+        audio.src =
+          URL.createObjectURL(blob);
+
         audio.hidden = false;
 
-        status.className = "success";
-        status.textContent = "✅ Música criada!";
+
+        status.className =
+          "success";
+
+        status.textContent =
+          "✅ Música de " +
+          duration +
+          " segundos criada!";
+
 
         return;
       }
+
 
       /*
         CASO 2:
@@ -372,38 +539,63 @@
       */
 
       if (
-        resultado.contentType.toLowerCase().includes("application/json")
+        resultado.contentType
+          .toLowerCase()
+          .includes("application/json")
       ) {
 
         let data;
 
+
         try {
-          data = JSON.parse(resultado.texto);
+
+          data =
+            JSON.parse(
+              resultado.texto
+            );
+
         } catch (jsonError) {
 
           throw new Error(
-            "O servidor informou JSON, mas enviou uma resposta inválida."
+            "O servidor informou JSON, " +
+            "mas enviou uma resposta inválida."
           );
         }
 
-        if (!responseOk(response)) {
+
+        if (
+          !responseOk(response)
+        ) {
+
           throw new Error(
             data.detail ||
             data.message ||
-            "Erro HTTP " + resultado.status
+            "Erro HTTP " +
+            resultado.status
           );
         }
 
+
         if (data.audio) {
 
-          audio.src = data.audio;
+          audio.src =
+            data.audio;
+
           audio.hidden = false;
 
-          status.className = "success";
-          status.textContent = "✅ Música criada!";
+
+          status.className =
+            "success";
+
+          status.textContent =
+            "✅ Música de " +
+            duration +
+            " segundos criada!";
+
 
           return;
         }
+
 
         throw new Error(
           data.detail ||
@@ -412,22 +604,32 @@
         );
       }
 
+
       /*
         CASO 3:
         HTML ou texto.
-        Aqui está a correção principal.
       */
 
-      const mensagem = limparHTML(resultado.texto);
+      const mensagem =
+        limparHTML(
+          resultado.texto
+        );
 
-      let erro = mensagem;
+
+      let erro =
+        mensagem;
+
 
       if (!erro) {
+
         erro =
           "O servidor retornou uma resposta vazia.";
       }
 
-      erro = limitar(erro);
+
+      erro =
+        limitar(erro);
+
 
       throw new Error(
         "HTTP " +
@@ -436,43 +638,63 @@
         erro
       );
 
+
     } catch (error) {
 
-      console.error("MusicIA erro:", error);
+      console.error(
+        "MusicIA erro:",
+        error
+      );
 
-      status.className = "error";
+
+      status.className =
+        "error";
+
 
       status.textContent =
         "❌ Não foi possível gerar: " +
-        (error.message || error);
+        (
+          error.message ||
+          error
+        );
 
-      /*
-        Mostra detalhes técnicos pequenos
-        para facilitar o diagnóstico.
-      */
 
       debug.hidden = false;
 
+
       debug.textContent =
         "Detalhes técnicos:\n" +
+        "Duração solicitada: " +
+        duration +
+        " segundos\n" +
         "Endpoint: /api/generate\n" +
-        "Status: verifique a mensagem acima.\n" +
         "Se aparecer uma mensagem do Render/ACE-Step, me envie exatamente ela.";
+
 
     } finally {
 
       button.disabled = false;
+
     }
+
   }
+
 
   function responseOk(response) {
-    return response.status >= 200 && response.status < 300;
+
+    return (
+      response.status >= 200 &&
+      response.status < 300
+    );
+
   }
 
-  $("generate").addEventListener(
-    "click",
-    gerarMusica
-  );
+
+  $("generate")
+    .addEventListener(
+      "click",
+      gerarMusica
+    );
 
 </script>
 
