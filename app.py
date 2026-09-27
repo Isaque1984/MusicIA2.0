@@ -42,7 +42,6 @@ print("MUSICIA - CONECTANDO AO ACE-STEP", flush=True)
 print("SPACE:", SPACE, flush=True)
 print("==========================================", flush=True)
 
-# Token do Hugging Face configurado no Render
 HF_TOKEN = os.environ.get("HF_TOKEN")
 
 if not HF_TOKEN:
@@ -66,6 +65,10 @@ class GenerateRequest(BaseModel):
     style: str = "Sertanejo"
     mood: str = "Motivacional"
     voice: str = "Masculina"
+
+    # Duração solicitada pelo usuário
+    # Valores permitidos: 10, 15, 30 ou 60 segundos
+    duration: int = 10
 
 
 # ============================================================
@@ -115,7 +118,6 @@ def extract_audio(result):
     if result is None:
         return None
 
-    # String
     if isinstance(result, str):
 
         if is_url(result):
@@ -126,10 +128,8 @@ def extract_audio(result):
 
         return None
 
-    # Dict
     if isinstance(result, dict):
 
-        # Prioridade para campos conhecidos
         priority_keys = [
             "audio",
             "audio_url",
@@ -152,7 +152,6 @@ def extract_audio(result):
                 if found:
                     return found
 
-        # Procura em tudo
         for value in result.values():
 
             found = extract_audio(value)
@@ -162,7 +161,6 @@ def extract_audio(result):
 
         return None
 
-    # Lista / tupla
     if isinstance(result, (list, tuple)):
 
         for value in result:
@@ -174,7 +172,6 @@ def extract_audio(result):
 
         return None
 
-    # Objetos do Gradio / dataclasses
     for attr in [
         "path",
         "url",
@@ -198,7 +195,6 @@ def extract_audio(result):
         except Exception:
             pass
 
-    # Tenta converter objetos para dict
     try:
 
         if hasattr(result, "__dict__"):
@@ -367,7 +363,6 @@ def get_generation_api():
 
     if endpoint is None:
 
-        # Procura variações
         for name, data in endpoints.items():
 
             if (
@@ -426,7 +421,6 @@ def parameter_default(parameter):
     if not isinstance(parameter, dict):
         return None, False
 
-    # Formas usadas por versões diferentes do Gradio
     for key in [
         "parameter_default",
         "default",
@@ -440,8 +434,6 @@ def parameter_default(parameter):
             if value is not None:
                 return value, True
 
-    # Algumas versões informam explicitamente
-    # se existe default
     if parameter.get(
         "parameter_has_default"
     ):
@@ -459,7 +451,7 @@ def parameter_default(parameter):
 
 
 # ============================================================
-# INFERÊNCIA DE VALOR SE O ENDPOINT NÃO INFORMAR DEFAULT
+# INFERÊNCIA DE VALOR
 # ============================================================
 
 def fallback_value(parameter, index):
@@ -506,21 +498,18 @@ def fallback_value(parameter, index):
         + description
     )
 
-    # Listas
     if (
         "list" in ptype
         or "checkboxgroup" in component
     ):
         return []
 
-    # Booleanos
     if (
         "bool" in ptype
         or "checkbox" in component
     ):
         return False
 
-    # Inteiros
     if (
         "int" in ptype
         or "integer" in ptype
@@ -538,7 +527,6 @@ def fallback_value(parameter, index):
 
         return 0
 
-    # Números decimais
     if (
         "float" in ptype
         or "slider" in component
@@ -558,18 +546,15 @@ def fallback_value(parameter, index):
 
         return 0.0
 
-    # Estados / objetos
     if "state" in component:
         return {}
 
-    # Arquivos
     if (
         "audio" in text
         or "file" in component
     ):
         return None
 
-    # Strings
     return ""
 
 
@@ -682,6 +667,27 @@ def build_generation_kwargs(
             value = "mp3"
 
         # ----------------------------------------------------
+        # DURAÇÃO
+        # ----------------------------------------------------
+        # Diferentes versões do ACE-Step podem chamar
+        # esse parâmetro por nomes diferentes.
+        #
+        # O valor escolhido pelo usuário é enviado aqui.
+        # Permitidos: 10, 15, 30 e 60 segundos.
+        # ----------------------------------------------------
+
+        elif (
+            "audio_duration" in lower
+            or lower in [
+                "duration",
+                "target_duration",
+                "audio_length"
+            ]
+        ):
+
+            value = int(request.duration)
+
+        # ----------------------------------------------------
         # MODELO
         # ----------------------------------------------------
 
@@ -695,7 +701,6 @@ def build_generation_kwargs(
         # CONFIGURAÇÕES SEGURAS
         # ----------------------------------------------------
 
-        # Nunca deixar False cair em campo numérico.
         if (
             isinstance(value, bool)
             and (
@@ -756,6 +761,13 @@ def generate_music(
 
     print(
         "INICIANDO GERAÇÃO",
+        flush=True
+    )
+
+    print(
+        "DURAÇÃO:",
+        request.duration,
+        "segundos",
         flush=True
     )
 
@@ -860,8 +872,6 @@ def generate_music(
 )
 def home():
 
-    # O Render copia o arquivo Frontend
-    # para frontend/index.html
     frontend = (
         Path(__file__).parent
         / "frontend"
@@ -908,7 +918,13 @@ def health():
         "ok": True,
         "service": "MusicIA",
         "version": "2.0",
-        "engine": "ACE-Step v1.5"
+        "engine": "ACE-Step v1.5",
+        "durations": [
+            10,
+            15,
+            30,
+            60
+        ]
     }
 
 
@@ -928,21 +944,39 @@ def generate(
             detail="Digite uma ideia para a música."
         )
 
+    # --------------------------------------------------------
+    # VALIDAÇÃO DA DURAÇÃO
+    # --------------------------------------------------------
+
+    if request.duration not in [
+        10,
+        15,
+        30,
+        60
+    ]:
+
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Duração inválida. "
+                "Escolha 10, 15, 30 ou 60 segundos."
+            )
+        )
+
     try:
 
         audio = generate_music(
             request
         )
 
-        # URL
         if is_url(audio):
 
             return {
                 "ok": True,
-                "audio": audio
+                "audio": audio,
+                "duration": request.duration
             }
 
-        # Arquivo local
         if is_file(audio):
 
             extension = (
@@ -1032,4 +1066,4 @@ if __name__ == "__main__":
         app,
         host="0.0.0.0",
         port=port
-            )
+)
