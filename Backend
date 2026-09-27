@@ -1,147 +1,449 @@
-import os, re, tempfile, shutil, uuid, inspect
+import os
+import tempfile
+import shutil
+import uuid
 from pathlib import Path
-from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
+
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
+from gradio_client import Client
 
-try:
-    from gradio_client import Client
-except Exception:
-    Client = None
 
-ROOT = Path(__file__).resolve().parent.parent
-FRONTEND = ROOT / "frontend"
+app = FastAPI(title="MusicIA API", version="2.0")
+
 AUDIO_DIR = Path(tempfile.gettempdir()) / "musicia_audio"
 AUDIO_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="MusicIA API", version="1.1")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
+# ACE-Step oficial
+client = Client("ACE-Step/Ace-Step-v1.5")
+
 
 class GenerateRequest(BaseModel):
     idea: str
     style: str = "Sertanejo"
-    mood: str = "Romântico"
+    mood: str = "Motivacional"
     voice: str = "Masculina"
 
-def build_prompt(x):
-    voice = "" if x.voice == "Instrumental" else f", {x.voice.lower()} vocal"
-    return f"{x.style} brasileiro, clima {x.mood.lower()}{voice}, produção moderna, melodia marcante, refrão forte, qualidade de estúdio. Tema: {x.idea}"
 
-def make_lyrics(x):
-    if x.voice == "Instrumental": return "[Instrumental]"
-    return (f"[Verso 1]\n{ x.idea }\nNo silêncio eu ouvi meu coração falar,\nque algumas histórias ainda vão voltar.\n\n"
-            "[Pré-Refrão]\nE se o destino quiser me encontrar,\neu vou estar aqui, pronto pra cantar.\n\n"
-            "[Refrão]\nEssa história não termina assim,\no que é de verdade não chega ao fim.\nSe a vida levou, pode devolver,\nporque eu ainda escolho você.")
+def extract_audio(result):
+    """
+    Procura o arquivo de áudio dentro das várias formas
+    que o Gradio pode devolver.
+    """
 
-def _param_info(client):
-    try:
-        info = client.view_api(return_format="dict")
-        return info
-    except Exception:
-        return None
+    if isinstance(result, dict):
 
-def _choose_endpoint(info):
-    if not isinstance(info, dict): return "/__call__"
-    candidates = []
-    for key, value in info.items():
-        if key in ("named_endpoints", "unnamed_endpoints") and isinstance(value, dict):
-            for ep, meta in value.items():
-                name = (meta.get("description", "") + " " + ep).lower() if isinstance(meta, dict) else ep.lower()
-                if any(w in name for w in ("generate", "music", "audio")):
-                    candidates.append(ep)
-    return candidates[0] if candidates else "/__call__"
+        for key in ["url", "path", "name"]:
+            value = result.get(key)
 
-def _build_args(meta, x, prompt, lyrics):
-    # Match parameters by their actual Gradio names, so the MusicIA is less dependent on a particular Space version.
-    if not isinstance(meta, dict): return None
-    params = meta.get("parameters") or meta.get("inputs") or []
-    if not isinstance(params, list): return None
-    vals = []
-    for p in params:
-        name = str(p.get("parameter_name") or p.get("name") or "").lower()
-        default = p.get("default")
-        if "lyric" in name: v = lyrics
-        elif any(k in name for k in ("caption", "prompt", "description", "tags")): v = prompt
-        elif "duration" in name: v = 30
-        elif "step" in name and "guidance" not in name: v = 16
-        elif "instrumental" in name: v = (x.voice == "Instrumental")
-        elif "language" in name: v = "pt"
-        elif "bpm" in name: v = None
-        elif "keyscale" in name or "time_signature" in name or "timesignature" in name: v = ""
-        elif "seed" in name: v = None
-        elif default is not None: v = default
-        else: v = None
-        vals.append(v)
-    return vals
+            if isinstance(value, str):
 
-def call_ace(prompt, lyrics, x):
-    if Client is None:
-        raise RuntimeError("Dependência gradio_client não instalada.")
-    space = os.getenv("ACESTEP_SPACE", "fffiloni/ACE-Step-API")
-    token = os.getenv("HF_TOKEN") or None
-    client = Client(space, token=token)
-    # Endpoint/API shape verified from public ACE-Step integrations.
-    return client.predict(
-        audio_duration=30,
-        prompt=prompt,
-        lyrics=lyrics,
-        infer_step=16,
-        guidance_scale=7,
-        scheduler_type="euler",
-        cfg_type="apg",
-        omega_scale=10,
-        manual_seeds=None,
-        guidance_interval=0.5,
-        guidance_interval_decay=0,
-        min_guidance_scale=3,
-        use_erg_tag=True,
-        use_erg_lyric=False,
-        use_erg_diffusion=True,
-        oss_steps=None,
-        guidance_scale_text=0,
-        guidance_scale_lyric=0,
-        audio2audio_enable=False,
-        ref_audio_strength=0.5,
-        ref_audio_input=None,
-        lora_name_or_path="none",
-        api_name="/__call__"
+                if value.startswith("http://") or value.startswith("https://"):
+                    return value
+
+                if os.path.isfile(value):
+                    return value
+
+        for value in result.values():
+            found = extract_audio(value)
+
+            if found:
+                return found
+
+    elif isinstance(result, (list, tuple)):
+
+        for value in result:
+            found = extract_audio(value)
+
+            if found:
+                return found
+
+    elif isinstance(result, str):
+
+        if result.startswith("http://") or result.startswith("https://"):
+            return result
+
+        if os.path.isfile(result):
+            return result
+
+    return None
+
+
+def create_prompt(request):
+    return (
+        f"{request.style} brasileiro, "
+        f"clima {request.mood.lower()}, "
+        f"voz {request.voice.lower()}, "
+        f"música em português do Brasil, "
+        f"produção moderna, "
+        f"melodia marcante, "
+        f"refrão forte e emocionante. "
+        f"Tema principal: {request.idea}"
     )
 
-def copy_audio(result):
-    # Gradio may return a single file, a tuple/list, dict, or URL.
-    if isinstance(result, (list, tuple)):
-        for item in result:
-            try:
-                return copy_audio(item)
-            except Exception: pass
-        raise RuntimeError("A IA não retornou um arquivo de áudio.")
-    if isinstance(result, dict):
-        src = result.get("path") or result.get("name") or result.get("url")
-    else: src = str(result)
-    if not src: raise RuntimeError("A IA não retornou um arquivo de áudio.")
-    if src.startswith(("http://", "https://")): return src
-    p = Path(src)
-    if not p.exists(): raise RuntimeError(f"Arquivo de áudio não encontrado: {src}")
-    dst = AUDIO_DIR / f"{uuid.uuid4().hex}{p.suffix or '.wav'}"
-    shutil.copy2(p, dst)
-    return f"/api/audio/{dst.name}"
 
-@app.get("/")
-def home(): return FileResponse(FRONTEND / "index.html")
-@app.get("/health")
-def health(): return {"ok": True, "service": "MusicIA", "version": "1.1"}
-@app.get("/api/audio/{name}")
-def audio(name: str):
-    p = AUDIO_DIR / Path(name).name
-    if not p.exists(): return JSONResponse({"error":"Áudio expirado ou não encontrado."}, status_code=404)
-    return FileResponse(p)
-@app.post("/api/generate")
-def generate(req: GenerateRequest):
-    if not req.idea.strip(): return JSONResponse({"ok":False,"error":"Digite uma ideia."},status_code=400)
+def create_lyrics(request):
+
+    if request.voice == "Instrumental":
+        return "[Instrumental]"
+
+    return f"""[Verso 1]
+{request.idea}
+Eu já caí, mas levantei
+Mesmo sofrendo, eu continuei
+A vida tentou me derrubar
+Mas eu nasci pra conquistar
+
+[Pré-Refrão]
+Cada batalha me fez mais forte
+Eu não dependo apenas da sorte
+Se existe um caminho pra seguir
+Eu vou lutar até conseguir
+
+[Refrão]
+Eu não vou desistir
+Enquanto houver força em mim
+Eu vou lutar, eu vou seguir
+Até chegar no meu fim
+
+Se a vida fechar uma porta
+Eu vou procurar outra saída
+Porque quem acredita no sonho
+Nunca abandona a própria vida
+
+[Verso 2]
+Já passei por dias difíceis
+Já pensei em parar
+Mas dentro do meu peito
+Ainda existe vontade de lutar
+
+[Refrão]
+Eu não vou desistir
+Enquanto houver força em mim
+Eu vou lutar, eu vou seguir
+Até chegar no meu fim
+"""
+
+
+def generate_music(request):
+
+    prompt = create_prompt(request)
+    lyrics = create_lyrics(request)
+
+    print("====================================", flush=True)
+    print("MUSICA IA - NOVA GERACAO", flush=True)
+    print("PROMPT:", prompt, flush=True)
+    print("LYRICS:", lyrics, flush=True)
+    print("====================================", flush=True)
+
+    # ==========================================================
+    # ACE-STEP v1.5
+    #
+    # Ordem baseada na geração atual do ACE-Step.
+    # ==========================================================
+
+    args = [
+
+        # 0
+        "acestep-v15-turbo",
+
+        # 1
+        "simple",
+
+        # 2
+        prompt,
+
+        # 3
+        "pt",
+
+        # 4 captions
+        prompt,
+
+        # 5 lyrics
+        lyrics,
+
+        # 6 bpm
+        None,
+
+        # 7 key_scale
+        "",
+
+        # 8 time_signature
+        "",
+
+        # 9 vocal_language
+        "pt",
+
+        # 10 inference_steps
+        8,
+
+        # 11 guidance_scale
+        7.0,
+
+        # 12 random_seed_checkbox
+        True,
+
+        # 13 seed
+        "-1",
+
+        # 14 reference_audio
+        None,
+
+        # 15 audio_duration
+        -1,
+
+        # 16 batch_size_input
+        1,
+
+        # 17 src_audio
+        None,
+
+        # 18 text2music_audio_code_string
+        "",
+
+        # 19 repainting_start
+        0.0,
+
+        # 20 repainting_end
+        -1,
+
+        # 21 instruction_display_gen
+        "Fill the audio semantic mask based on the given conditions:",
+
+        # 22 audio_cover_strength
+        1.0,
+
+        # 23 task_type
+        "text2music",
+
+        # 24 use_adg
+        False,
+
+        # 25 cfg_interval_start
+        0.0,
+
+        # 26 cfg_interval_end
+        1.0,
+
+        # 27 shift
+        3.0,
+
+        # 28 infer_method
+        "ode",
+
+        # 29 custom_timesteps
+        "",
+
+        # 30 audio_format
+        "mp3",
+
+        # 31 lm_temperature
+        0.85,
+
+        # 32 think_checkbox
+        True,
+
+        # 33 lm_cfg_scale
+        2.0,
+
+        # 34 lm_top_k
+        0,
+
+        # 35 lm_top_p
+        0.9,
+
+        # 36 lm_negative_prompt
+        "NO USER INPUT",
+
+        # 37 use_cot_metas
+        True,
+
+        # 38 use_cot_caption
+        True,
+
+        # 39 use_cot_language
+        True,
+
+        # 40 is_format_caption_state
+        False,
+
+        # 41 constrained_decoding_debug
+        False,
+
+        # 42 allow_lm_batch
+        True,
+
+        # 43 auto_score
+        False,
+
+        # 44 auto_lrc
+        False,
+
+        # 45 score_scale
+        0.5,
+
+        # 46 lm_batch_chunk_size
+        8,
+
+        # 47 track_name
+        None,
+
+        # 48 complete_track_classes
+        [],
+
+        # 49 autogen_checkbox
+        False,
+
+        # 50 current_batch_index
+        0,
+
+        # 51 total_batches
+        1,
+
+        # 52 batch_queue
+        [],
+
+        # 53 generation_params_state
+        {}
+    ]
+
+    print("TOTAL DE PARAMETROS:", len(args), flush=True)
+
     try:
-        prompt, lyrics = build_prompt(req), make_lyrics(req)
-        result = call_ace(prompt, lyrics, req)
-        return {"ok":True,"audio_url":copy_audio(result),"lyrics":lyrics,"prompt":prompt}
-    except Exception as e:
-        return JSONResponse({"ok":False,"error":f"Não consegui gerar agora: {type(e).__name__}: {e}"},status_code=502)
+
+        result = client.predict(
+            *args,
+            api_name="/generation_wrapper"
+        )
+
+        print("RESULTADO ACE-STEP:", repr(result), flush=True)
+
+        audio = extract_audio(result)
+
+        if not audio:
+            raise RuntimeError(
+                "O ACE-Step respondeu, mas não retornou um arquivo de áudio."
+            )
+
+        return audio
+
+    except Exception as error:
+
+        print(
+            "ERRO ACE-STEP:",
+            repr(error),
+            flush=True
+        )
+
+        raise
+
+
+@app.get("/", response_class=HTMLResponse)
+def home():
+
+    frontend = Path(__file__).parent / "frontend" / "index.html"
+
+    if frontend.exists():
+        return frontend.read_text(encoding="utf-8")
+
+    return """
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+        <meta charset="UTF-8">
+        <title>MusicIA</title>
+    </head>
+    <body>
+        <h1>🎵 MusicIA</h1>
+        <p>Frontend não encontrado.</p>
+    </body>
+    </html>
+    """
+
+
+@app.get("/health")
+def health():
+
+    return {
+        "ok": True,
+        "service": "MusicIA",
+        "version": "2.0"
+    }
+
+
+@app.post("/api/generate")
+def generate(request: GenerateRequest):
+
+    if not request.idea.strip():
+
+        raise HTTPException(
+            status_code=400,
+            detail="Digite uma ideia para a música."
+        )
+
+    try:
+
+        audio = generate_music(request)
+
+        # Se o Gradio devolver URL
+        if isinstance(audio, str):
+
+            if audio.startswith("http://") or audio.startswith("https://"):
+                return {
+                    "ok": True,
+                    "audio": audio
+                }
+
+            # Arquivo local
+            if os.path.isfile(audio):
+
+                extension = Path(audio).suffix or ".mp3"
+
+                destination = (
+                    AUDIO_DIR /
+                    f"{uuid.uuid4().hex}{extension}"
+                )
+
+                shutil.copy2(audio, destination)
+
+                return FileResponse(
+                    destination,
+                    media_type="audio/mpeg",
+                    filename="musicia.mp3"
+                )
+
+        raise RuntimeError(
+            "Não foi possível localizar o áudio gerado."
+        )
+
+    except Exception as error:
+
+        print(
+            "ERRO FINAL:",
+            repr(error),
+            flush=True
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"{type(error).__name__}: {error}"
+        )
+
+
+if __name__ == "__main__":
+
+    import uvicorn
+
+    port = int(
+        os.environ.get(
+            "PORT",
+            "10000"
+        )
+    )
+
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=port
+    )
