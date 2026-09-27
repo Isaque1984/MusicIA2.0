@@ -42,8 +42,17 @@ print("MUSICIA - CONECTANDO AO ACE-STEP", flush=True)
 print("SPACE:", SPACE, flush=True)
 print("==========================================", flush=True)
 
+# Token do Hugging Face configurado no Render
+HF_TOKEN = os.environ.get("HF_TOKEN")
+
+if not HF_TOKEN:
+    raise RuntimeError(
+        "HF_TOKEN não configurado no Render."
+    )
+
 client = Client(
     SPACE,
+    token=HF_TOKEN,
     verbose=True
 )
 
@@ -1023,4 +1032,4 @@ if __name__ == "__main__":
         app,
         host="0.0.0.0",
         port=port
-    )
+            )
